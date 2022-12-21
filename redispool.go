@@ -5,12 +5,14 @@ import (
 	"time"
 
 	"github.com/gomodule/redigo/redis"
+	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 	"vitess.io/vitess/go/pools"
 )
 
 // These constants to be used as keys.
 const (
+	RKeyJwtKey          = "ych:jwtkey"
 	RKeyWorkers         = "ych:workers"
 	RKeyStatFailed      = "ych:stat:failed:"
 	RKeyStatProcessed   = "ych:stat:processed:"
@@ -25,30 +27,18 @@ const (
 	RKeyNS              = "ych:"
 )
 
-// // RedisResourceConnT to have as handler
-// type RedisResourceConnT struct {
-// 	Connection redis.Conn
-// }
-
-// // Close to stop internals
-// func (r RedisResourceConnT) Close() {
-// 	r.Connection.Close()
-// }
-
 // InitRedisPool initialization
 func InitRedisPool() error {
 	Env.RedisPool = newRedisPool(Conf.Redis, 1, 10, 5*time.Minute)
-	// Env.RedisPool = pools.NewResourcePool(func() (pools.Resource, error) {
-	// 	connString := Conf.Redis
-	// 	var dialOptions []redis.DialOption
-	// 	dialOptions = append(dialOptions, redis.DialClientName("backws"))
-	// 	c, err := redis.Dial("tcp", connString, dialOptions...)
-	// 	if err != nil {
-	// 		log.Print(err)
-	// 	}
-	// 	return RedisResourceConnT{Connection: c}, err
-	// }, 1, 10 /*max connections*/, 5*time.Minute, 0)
-
+	switch val := RedisDo("GET", RKeyJwtKey).(type) {
+	case []byte:
+		Env.JwtKey = string(val)
+	}
+	if Env.JwtKey == "" {
+		uuid_obj, _ := uuid.NewUUID()
+		Env.JwtKey = uuid_obj.String()
+		RedisDo("SET", RKeyJwtKey, Env.JwtKey)
+	}
 	RegisterServer()
 	return nil
 }

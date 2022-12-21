@@ -64,6 +64,7 @@ func (h *WebSocketsHub) run() {
 			if _, ok := h.clients[client]; ok {
 				delete(h.clients, client)
 				close(client.send)
+				//log.Println("ses unreg close")
 				if sessionID, ok := h.sessions[client]; ok {
 					delete(h.clientsBySession, sessionID)
 					delete(h.sessions, client)
@@ -80,7 +81,7 @@ func (h *WebSocketsHub) run() {
 				}
 			}
 		case msg := <-h.inmessages:
-			log.Info("wsinp:", string(msg.data))
+			//log.Info("wsinp:", string(msg.data))
 
 			base := WsReqT{}
 			init := WsInitReqT{}
@@ -88,7 +89,7 @@ func (h *WebSocketsHub) run() {
 			buf := bytes.NewBuffer(msg.data)
 			err := json.NewDecoder(buf).Decode(&base)
 			if err != nil {
-				log.Println(err)
+				log.Errorln("inmessage json decode:", err)
 				continue
 			}
 
@@ -96,14 +97,14 @@ func (h *WebSocketsHub) run() {
 				buf = bytes.NewBuffer(msg.data)
 				err = json.NewDecoder(buf).Decode(&init)
 				if err != nil {
-					log.Println(err)
+					log.Errorln("inmessage init json decode:", err)
 					continue
 				}
 
-				log.Println("jwt:", init.Jwt)
+				//log.Println("jwt:", init.Jwt)
 
-				uid, exp, _ := VerifyJwt(init.Jwt, nil, Conf.JwtKey)
-				log.Println("user:", uid, exp)
+				uid, exp, _ := VerifyJwt(init.Jwt, nil, Env.JwtKey)
+				//log.Println("user:", uid, exp)
 
 				sessionID := ""
 				hasSession := false
@@ -142,6 +143,7 @@ func (h *WebSocketsHub) run() {
 				case client.send <- msg.data:
 				default:
 					close(client.send)
+					//log.Println("ses def close")
 					delete(h.clients, client)
 					delete(h.sessions, client)
 					delete(h.clientsBySession, msg.sessionID)
@@ -152,6 +154,7 @@ func (h *WebSocketsHub) run() {
 					case client.send <- msg.data:
 					default:
 						close(client.send)
+						//log.Println("all def close")
 						delete(h.clients, client)
 						delete(h.sessions, client)
 						delete(h.clientsBySession, msg.sessionID)

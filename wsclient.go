@@ -10,10 +10,10 @@ import (
 )
 
 const (
-	writeWait      = 10 * time.Second
+	writeWait      = 40 * time.Second
 	pongWait       = 60 * time.Second
-	pingPeriod     = (pongWait * 9) / 10
-	maxMessageSize = 512
+	pingPeriod     = (pongWait * 7) / 10
+	maxMessageSize = 4096
 )
 
 var (
@@ -22,8 +22,9 @@ var (
 )
 
 var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
+	ReadBufferSize:   1024,
+	WriteBufferSize:  1024,
+	HandshakeTimeout: 300 * time.Second,
 	CheckOrigin: func(r *http.Request) bool {
 		return true // todo origin
 	},
@@ -62,8 +63,10 @@ func (c *WebSocketClient) readPump() {
 	for {
 		_, message, err := c.conn.ReadMessage()
 		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway) {
-				log.Printf("error: %v", err)
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				log.Errorf("error unexp: %v", err)
+			} else {
+				log.Errorf("error exp: %v", err)
 			}
 			break
 		}
@@ -84,13 +87,14 @@ func (c *WebSocketClient) writePump() {
 		case message, ok := <-c.send:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
-				// The hub closed the channel.
+				log.Errorln("The hub is closing the channel. not ok from c.send")
 				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
 
 			w, err := c.conn.NextWriter(websocket.TextMessage)
 			if err != nil {
+				log.Errorln("NextWriter", err)
 				return
 			}
 			w.Write(message)
@@ -102,11 +106,13 @@ func (c *WebSocketClient) writePump() {
 			}
 
 			if err := w.Close(); err != nil {
+				log.Errorln("w.Close()", err)
 				return
 			}
 		case <-ticker.C:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := c.conn.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
+				log.Errorln("write ping msg err:", err)
 				return
 			}
 		}
@@ -116,7 +122,7 @@ func (c *WebSocketClient) writePump() {
 func serveWs(hub *WebSocketsHub, w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Println(err)
+		log.Errorln("upgrader.Upgrade, err:", err)
 		return
 	}
 	client := &WebSocketClient{hub: hub, conn: conn, send: make(chan []byte, 256)}

@@ -13,15 +13,15 @@ import (
 
 // ConfigT as db conf, etc
 type ConfigT struct {
-	Port   int    `yaml:"port"`
-	Redis  string `yaml:"redis"`
-	JwtKey string `yaml:"jwtkey"`
+	Port  int    `yaml:"port"`
+	Redis string `yaml:"redis"`
 }
 
 // EnvT as db, etc
 type EnvT struct {
 	RedisPool *pools.ResourcePool
 	WsHub     *WebSocketsHub
+	JwtKey    string
 	ServerID  string
 }
 
@@ -35,7 +35,7 @@ func startHTTP() {
 	http.Handle("/", &WebSocketRespT{})
 
 	addr := ":" + strconv.Itoa(Conf.Port)
-	log.Println("about to start server addr:", addr)
+	log.Warnln("about to start server addr:", addr)
 
 	err := http.ListenAndServe(addr, nil)
 	if err != nil {
