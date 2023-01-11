@@ -19,7 +19,7 @@ COPY --from=dev /backws/backws /usr/bin
 
 RUN mkdir /backws
 WORKDIR /backws
-ADD config-nt-dex.yml /backws/config.yml
+ADD config.yml /backws/config.yml
 
 ENTRYPOINT ["backws"]
 
