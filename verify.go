@@ -10,7 +10,7 @@ import (
 )
 
 // VerifyWsJwt check in ws
-func VerifyJwt(jwtdata string, headers map[string][]string, sigkey string) (uid string, exp int64, err error) {
+func VerifyJwt(jwtdata string, headers map[string][]string, sigkey string) (uid string, grps []string, exp int64, err error) {
 	t := time.Now()
 	uid = ""
 	exp = -1
@@ -36,9 +36,8 @@ func VerifyJwt(jwtdata string, headers map[string][]string, sigkey string) (uid 
 	signingKey := []byte(sigkey)
 	accessToken, err := jwt.Parse(jwtdata, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("Unexpected signing method: %v", token.Header["alg"])
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
-
 		return signingKey, nil
 	})
 
@@ -49,30 +48,36 @@ func VerifyJwt(jwtdata string, headers map[string][]string, sigkey string) (uid 
 	claims, ok := accessToken.Claims.(jwt.MapClaims)
 	if ok && accessToken.Valid {
 		if !claims.VerifyExpiresAt(t.UTC().Unix(), true) {
-			err = fmt.Errorf("Token is expired")
+			err = fmt.Errorf("token is expired")
 			return
 		}
 	} else {
-		err = fmt.Errorf("Token is not valid")
+		err = fmt.Errorf("token is not valid")
 		return
 	}
 
 	// uid
 	uidi, hasu := claims["uid"]
 	if !hasu {
-		err = fmt.Errorf("Token has no uid")
+		err = fmt.Errorf("token has no uid")
 		return
 	}
 	// sid
 	sidi, hass := claims["sid"]
 	if !hass {
-		err = fmt.Errorf("Token has no sid")
+		err = fmt.Errorf("token has no sid")
 		return
 	}
 	// exp
 	expi, hase := claims["exp"]
 	if !hase {
-		err = fmt.Errorf("Token has no exp")
+		err = fmt.Errorf("token has no exp")
+		return
+	}
+	// exp
+	grpi, hasg := claims["grp"]
+	if !hasg {
+		err = fmt.Errorf("token has no grp")
 		return
 	}
 
@@ -81,7 +86,7 @@ func VerifyJwt(jwtdata string, headers map[string][]string, sigkey string) (uid 
 	case string:
 		uid = uidv
 	default:
-		err = fmt.Errorf("Token is not valid")
+		err = fmt.Errorf("token is not valid")
 		return
 	}
 
@@ -90,12 +95,12 @@ func VerifyJwt(jwtdata string, headers map[string][]string, sigkey string) (uid 
 	case string:
 		sid = sidv
 	default:
-		err = fmt.Errorf("Token is not valid")
+		err = fmt.Errorf("token is not valid")
 		return
 	}
 	if headers != nil {
 		if exp_sid != sid {
-			err = fmt.Errorf("Token not valid")
+			err = fmt.Errorf("token not valid")
 			return
 		}
 	}
@@ -105,12 +110,29 @@ func VerifyJwt(jwtdata string, headers map[string][]string, sigkey string) (uid 
 	case float64:
 		exp = int64(expv)
 	default:
-		err = fmt.Errorf("Token is not valid")
+		err = fmt.Errorf("token is not valid")
 		return
 	}
 
+	grps = []string{}
+	if grpi != nil {
+		switch grpv := grpi.(type) {
+		case []interface{}:
+			grpa := []interface{}(grpv)
+			for _, gi := range grpa {
+				switch giv := gi.(type) {
+				case float64:
+					g := fmt.Sprintf("%08x", int(giv))
+					grps = append(grps, g)
+				default:
+					continue
+				}
+			}
+		}
+	}
+
 	if len(uid) == 0 {
-		err = fmt.Errorf("Token is not valid")
+		err = fmt.Errorf("token is not valid")
 		return
 	}
 

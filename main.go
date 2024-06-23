@@ -1,8 +1,8 @@
 package main
 
 import (
-	"io/ioutil"
 	"net/http"
+	"os"
 	"strconv"
 
 	uuid "github.com/pborman/uuid"
@@ -44,15 +44,15 @@ func startHTTP() {
 }
 
 func main() {
-	buf, err := ioutil.ReadFile("config.yml")
+	buf, err := os.ReadFile("config.yml")
 	if err != nil {
-		log.Fatalf("Cannot read config.yml err: %v", err)
+		log.Fatalln("Cannot read config.yml err:", err)
 		return
 	}
 
 	err = yaml.Unmarshal(buf, &Conf)
 	if err != nil {
-		log.Fatalf("config err: %v", err)
+		log.Fatalln("config err:", err)
 		return
 	}
 

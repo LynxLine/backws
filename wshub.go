@@ -11,11 +11,12 @@ import (
 // WebSocketsHub maintains the set of active clients
 type WebSocketsHub struct {
 	// Registered clients.
-	clients          map[*WebSocketClient]bool
-	clientsBySession map[string]*WebSocketClient
-	sessions         map[*WebSocketClient]string
-	userSessions     map[string]map[string]bool
-	sessionUID       map[string]string
+	clients        map[*WebSocketClient]bool
+	session2client map[string]*WebSocketClient
+	client2session map[*WebSocketClient]string
+	userSessions   map[string]map[string]bool
+	sessionUID     map[string]string
+	sessionGID     map[string][]string
 
 	// Inbound messages from the clients.
 	inmessages chan *WebSocketInpMessage
@@ -43,15 +44,15 @@ type WsInitReqT struct {
 
 func newHub() *WebSocketsHub {
 	return &WebSocketsHub{
-		inmessages:       make(chan *WebSocketInpMessage),
-		outmessages:      make(chan *WebSocketOutMessage),
-		register:         make(chan *WebSocketClient),
-		unregister:       make(chan *WebSocketClient),
-		clients:          make(map[*WebSocketClient]bool),
-		sessions:         make(map[*WebSocketClient]string),
-		clientsBySession: make(map[string]*WebSocketClient),
-		userSessions:     make(map[string]map[string]bool),
-		sessionUID:       make(map[string]string),
+		inmessages:     make(chan *WebSocketInpMessage),
+		outmessages:    make(chan *WebSocketOutMessage),
+		register:       make(chan *WebSocketClient),
+		unregister:     make(chan *WebSocketClient),
+		clients:        make(map[*WebSocketClient]bool),
+		client2session: make(map[*WebSocketClient]string),
+		session2client: make(map[string]*WebSocketClient),
+		sessionUID:     make(map[string]string),
+		sessionGID:     make(map[string][]string),
 	}
 }
 
@@ -61,23 +62,27 @@ func (h *WebSocketsHub) run() {
 		case client := <-h.register:
 			h.clients[client] = true
 		case client := <-h.unregister:
-			if _, ok := h.clients[client]; ok {
+			if _, has := h.clients[client]; has {
 				delete(h.clients, client)
 				close(client.send)
 				//log.Println("ses unreg close")
-				if sessionID, ok := h.sessions[client]; ok {
-					delete(h.clientsBySession, sessionID)
-					delete(h.sessions, client)
-					if uid, ok := h.sessionUID[sessionID]; ok {
-						if _, ok := h.userSessions[uid]; ok {
-							delete(h.userSessions[uid], sessionID)
-						}
-						delete(h.sessionUID, uid)
-						RedisDo("HDEL", RKeyUserSessions+uid, sessionID)
-						RedisDo("HDEL", RKeyUserExpirations+uid, sessionID)
+				if session_id, has := h.client2session[client]; has {
+					delete(h.session2client, session_id)
+					delete(h.client2session, client)
+					if uidhex, has := h.sessionUID[session_id]; has {
+						delete(h.sessionUID, session_id)
+						RedisDo("HDEL", RKeyUserSessions+uidhex, session_id)
+						RedisDo("HDEL", RKeyUserExpirations+uidhex, session_id)
 					}
-					RedisDo("HDEL", RKeySessionsUsers, sessionID)
-					RedisDo("HDEL", RKeySessionsServers, sessionID)
+					if grps, has := h.sessionGID[session_id]; has {
+						delete(h.sessionGID, session_id)
+						for _, grphex := range grps {
+							RedisDo("HDEL", RKeyGroupSessions+grphex, session_id)
+							RedisDo("HDEL", RKeyGroupExpirations+grphex, session_id)
+						}
+					}
+					RedisDo("HDEL", RKeySessionsUsers, session_id)
+					RedisDo("HDEL", RKeySessionsServers, session_id)
 				}
 			}
 		case msg := <-h.inmessages:
@@ -103,50 +108,57 @@ func (h *WebSocketsHub) run() {
 
 				//log.Println("jwt:", init.Jwt)
 
-				uid, exp, _ := VerifyJwt(init.Jwt, nil, Env.JwtKey)
+				uidhex, grps, exp, _ := VerifyJwt(init.Jwt, nil, Env.JwtKey)
 				//log.Println("user:", uid, exp)
 
-				sessionID := ""
-				hasSession := false
-				sessionID, hasSession = h.sessions[msg.client]
-				if !hasSession {
-					sessionID = uuid.New()
+				session_id := ""
+				has_session := false
+				session_id, has_session = h.client2session[msg.client]
+				if !has_session {
+					session_id = uuid.New()
 				} else {
-					oldUid := h.sessionUID[sessionID]
-					if _, hasUserSessions := h.userSessions[oldUid]; hasUserSessions {
-						delete(h.userSessions[oldUid], sessionID)
-						RedisDo("HDEL", RKeyUserSessions+oldUid, sessionID)
-						RedisDo("HDEL", RKeyUserExpirations+oldUid, sessionID)
+					if old_uidhex, has := h.sessionUID[session_id]; has {
+						RedisDo("HDEL", RKeyUserSessions+old_uidhex, session_id)
+						RedisDo("HDEL", RKeyUserExpirations+old_uidhex, session_id)
+						delete(h.sessionUID, session_id)
 					}
-					delete(h.sessionUID, oldUid)
+					if old_grps, has := h.sessionGID[session_id]; has {
+						for _, old_grphex := range old_grps {
+							RedisDo("HDEL", RKeyGroupSessions+old_grphex, session_id)
+							RedisDo("HDEL", RKeyGroupExpirations+old_grphex, session_id)
+						}
+						delete(h.sessionGID, session_id)
+					}
 				}
-				if _, hasUserSessions := h.userSessions[uid]; !hasUserSessions {
-					h.userSessions[uid] = make(map[string]bool)
+				h.sessionUID[session_id] = uidhex
+				h.sessionGID[session_id] = grps
+
+				h.client2session[msg.client] = session_id
+				h.session2client[session_id] = msg.client
+
+				RedisDo("HSET", RKeyUserSessions+uidhex, session_id, Env.ServerID)
+				RedisDo("HSET", RKeyUserExpirations+uidhex, session_id, exp)
+				for _, grphex := range grps {
+					RedisDo("HSET", RKeyGroupSessions+grphex, session_id, Env.ServerID)
+					RedisDo("HSET", RKeyGroupExpirations+grphex, session_id, exp)
 				}
-				h.userSessions[uid][sessionID] = true
-				h.sessionUID[sessionID] = uid
-
-				h.sessions[msg.client] = sessionID
-				h.clientsBySession[sessionID] = msg.client
-
-				RedisDo("HSET", RKeyUserSessions+uid, sessionID, Env.ServerID)
-				RedisDo("HSET", RKeyUserExpirations+uid, sessionID, exp)
-				RedisDo("HSET", RKeyServerSessions+Env.ServerID, sessionID, uid)
-				RedisDo("HSET", RKeySessionsUsers, sessionID, uid)
-				RedisDo("HSET", RKeySessionsServers, sessionID, Env.ServerID)
+				RedisDo("HSET", RKeyServerGroups+Env.ServerID, session_id, grps)
+				RedisDo("HSET", RKeyServerSessions+Env.ServerID, session_id, uidhex)
+				RedisDo("HSET", RKeySessionsUsers, session_id, uidhex)
+				RedisDo("HSET", RKeySessionsServers, session_id, Env.ServerID)
 			}
 
 		case msg := <-h.outmessages:
 			//log.Info("wsout:", strings.TrimSpace(string(msg.data)))
-			if client, ok := h.clientsBySession[msg.sessionID]; ok {
+			if client, ok := h.session2client[msg.sessionID]; ok {
 				select {
 				case client.send <- msg.data:
 				default:
 					close(client.send)
 					//log.Println("ses def close")
 					delete(h.clients, client)
-					delete(h.sessions, client)
-					delete(h.clientsBySession, msg.sessionID)
+					delete(h.client2session, client)
+					delete(h.session2client, msg.sessionID)
 				}
 			} else if msg.sessionID == "*" {
 				for client := range h.clients {
@@ -156,8 +168,8 @@ func (h *WebSocketsHub) run() {
 						close(client.send)
 						//log.Println("all def close")
 						delete(h.clients, client)
-						delete(h.sessions, client)
-						delete(h.clientsBySession, msg.sessionID)
+						delete(h.client2session, client)
+						delete(h.session2client, msg.sessionID)
 					}
 				}
 			}

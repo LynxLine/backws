@@ -12,19 +12,22 @@ import (
 
 // These constants to be used as keys.
 const (
-	RKeyJwtKey          = "ych:jwtkey"
-	RKeyWorkers         = "ych:workers"
-	RKeyStatFailed      = "ych:stat:failed:"
-	RKeyStatProcessed   = "ych:stat:processed:"
-	RKeyServers         = "ych:servers"
-	RKeyServerQueue     = "ych:queue:"
-	RKeyServerSessions  = "ych:server_sessions:"
-	RKeySessionsUsers   = "ych:sessions_users"
-	RKeySessionsServers = "ych:sessions_servers"
-	RKeyUserSessions    = "ych:user_sessions:"
-	RKeyUserExpirations = "ych:user_expirations:"
-	RKeyQueue           = "ych:queue:"
-	RKeyNS              = "ych:"
+	RKeyJwtKey           = "ych:jwtkey"
+	RKeyWorkers          = "ych:workers"
+	RKeyStatFailed       = "ych:stat:failed:"
+	RKeyStatProcessed    = "ych:stat:processed:"
+	RKeyServers          = "ych:servers"
+	RKeyServerQueue      = "ych:queue:"
+	RKeyServerGroups     = "ych:server_groups:"
+	RKeyServerSessions   = "ych:server_sessions:"
+	RKeySessionsUsers    = "ych:sessions_users"
+	RKeySessionsServers  = "ych:sessions_servers"
+	RKeyUserSessions     = "ych:user_sessions:"
+	RKeyUserExpirations  = "ych:user_expirations:"
+	RKeyGroupSessions    = "ych:group_sessions:"
+	RKeyGroupExpirations = "ych:group_expirations:"
+	RKeyQueue            = "ych:queue:"
+	RKeyNS               = "ych:"
 )
 
 // InitRedisPool initialization
@@ -61,15 +64,13 @@ func newRedisPool(uri string, capacity int, maxCapacity int, idleTimout time.Dur
 	return pools.NewResourcePool(newRedisFactory(uri), capacity, maxCapacity, idleTimout)
 }
 
-func redisConnFromURI(connString string) (*RedisConn, error) {
-
-	var dialOptions []redis.DialOption
-	dialOptions = append(dialOptions, redis.DialClientName("backws"))
-	conn, err := redis.Dial("tcp", connString, dialOptions...)
+func redisConnFromURI(conn_str string) (*RedisConn, error) {
+	var dial_opts []redis.DialOption
+	dial_opts = append(dial_opts, redis.DialClientName("backws"))
+	conn, err := redis.Dial("tcp", conn_str, dial_opts...)
 	if err != nil {
 		return nil, err
 	}
-
 	return &RedisConn{Conn: conn}, nil
 }
 
@@ -80,10 +81,8 @@ func RedisDo(cmd string, args ...interface{}) interface{} {
 	if err != nil {
 		log.Fatal(err)
 	}
-
 	defer Env.RedisPool.Put(res)
 	c := res.(*RedisConn).Conn
-
 	val, err := c.Do(cmd, args...)
 	if err != nil {
 		log.Fatal(err)
